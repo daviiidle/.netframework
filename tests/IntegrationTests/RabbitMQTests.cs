@@ -40,8 +40,8 @@ public class RabbitMQTests : IDisposable
     {
         if (_queue == null)
         {
-            // This will cause xUnit to skip the test
-            Assert.True(false, "RabbitMQ is not available. Start with: docker compose up -d");
+            // This will cause xUnit to fail the test with a helpful message
+            Assert.Fail("RabbitMQ is not available. Start with: docker compose up -d");
         }
     }
 
