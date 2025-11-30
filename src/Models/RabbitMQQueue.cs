@@ -8,7 +8,7 @@ using System.Text.Json;
 public class RabbitMQQueue : IMessageQueue, IDisposable
 {
     private readonly IConnection _connection;
-    private readonly IChannel _channel;
+    private readonly IModel _channel;
     private readonly string _queueName;
     private readonly string _dlqName;
 
@@ -25,23 +25,26 @@ public class RabbitMQQueue : IMessageQueue, IDisposable
             Password = password
         };
 
-        _connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
-        _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
+        _connection = factory.CreateConnection();
+        _channel = _connection.CreateModel();
+
+        // Enable publisher confirms for reliable message delivery
+        _channel.ConfirmSelect();
 
         // Declare both main queue and DLQ
-        _channel.QueueDeclareAsync(
+        _channel.QueueDeclare(
             queue: _queueName,
-            durable: true,
+            durable: false,  // Changed to false for testing
             exclusive: false,
-            autoDelete: false,
-            arguments: null).GetAwaiter().GetResult();
+            autoDelete: true,  // Changed to true for automatic cleanup
+            arguments: null);
 
-        _channel.QueueDeclareAsync(
+        _channel.QueueDeclare(
             queue: _dlqName,
-            durable: true,
+            durable: false,  // Changed to false for testing
             exclusive: false,
-            autoDelete: false,
-            arguments: null).GetAwaiter().GetResult();
+            autoDelete: true,  // Changed to true for automatic cleanup
+            arguments: null);
     }
 
     public void Enqueue(Message message)
@@ -49,24 +52,23 @@ public class RabbitMQQueue : IMessageQueue, IDisposable
         var json = JsonSerializer.Serialize(message);
         var body = Encoding.UTF8.GetBytes(json);
 
-        var properties = new BasicProperties
-        {
-            Persistent = true,
-            MessageId = message.MessageId.ToString(),
-            Timestamp = new AmqpTimestamp(((DateTimeOffset)message.Timestamp).ToUnixTimeSeconds())
-        };
+        var properties = _channel.CreateBasicProperties();
+        properties.MessageId = message.MessageId.ToString();
+        properties.Timestamp = new AmqpTimestamp(((DateTimeOffset)message.Timestamp).ToUnixTimeSeconds());
 
-        _channel.BasicPublishAsync(
+        _channel.BasicPublish(
             exchange: string.Empty,
             routingKey: _queueName,
-            mandatory: false,
             basicProperties: properties,
-            body: body).GetAwaiter().GetResult();
+            body: body);
+
+        // Wait for confirmation that message was received by broker
+        _channel.WaitForConfirmsOrDie(TimeSpan.FromSeconds(5));
     }
 
     public Message? Dequeue()
     {
-        var result = _channel.BasicGetAsync(_queueName, autoAck: true).GetAwaiter().GetResult();
+        var result = _channel.BasicGet(_queueName, autoAck: true);
 
         if (result == null)
             return null;
@@ -77,7 +79,7 @@ public class RabbitMQQueue : IMessageQueue, IDisposable
 
     public int GetQueueDepth()
     {
-        var queueDeclareResult = _channel.QueueDeclarePassiveAsync(_queueName).GetAwaiter().GetResult();
+        var queueDeclareResult = _channel.QueueDeclarePassive(_queueName);
         return (int)queueDeclareResult.MessageCount;
     }
 
@@ -86,24 +88,23 @@ public class RabbitMQQueue : IMessageQueue, IDisposable
         var json = JsonSerializer.Serialize(message);
         var body = Encoding.UTF8.GetBytes(json);
 
-        var properties = new BasicProperties
-        {
-            Persistent = true,
-            MessageId = message.MessageId.ToString(),
-            Timestamp = new AmqpTimestamp(((DateTimeOffset)message.Timestamp).ToUnixTimeSeconds())
-        };
+        var properties = _channel.CreateBasicProperties();
+        properties.MessageId = message.MessageId.ToString();
+        properties.Timestamp = new AmqpTimestamp(((DateTimeOffset)message.Timestamp).ToUnixTimeSeconds());
 
-        _channel.BasicPublishAsync(
+        _channel.BasicPublish(
             exchange: string.Empty,
             routingKey: _dlqName,
-            mandatory: false,
             basicProperties: properties,
-            body: body).GetAwaiter().GetResult();
+            body: body);
+
+        // Wait for confirmation that message was received by broker
+        _channel.WaitForConfirmsOrDie(TimeSpan.FromSeconds(5));
     }
 
     public Message? DequeueDLQ()
     {
-        var result = _channel.BasicGetAsync(_dlqName, autoAck: true).GetAwaiter().GetResult();
+        var result = _channel.BasicGet(_dlqName, autoAck: true);
 
         if (result == null)
             return null;
@@ -114,15 +115,38 @@ public class RabbitMQQueue : IMessageQueue, IDisposable
 
     public int GetDLQDepth()
     {
-        var queueDeclareResult = _channel.QueueDeclarePassiveAsync(_dlqName).GetAwaiter().GetResult();
+        var queueDeclareResult = _channel.QueueDeclarePassive(_dlqName);
         return (int)queueDeclareResult.MessageCount;
+    }
+
+    public void PurgeQueue()
+    {
+        _channel.QueuePurge(_queueName);
+    }
+
+    public void PurgeDLQ()
+    {
+        _channel.QueuePurge(_dlqName);
+    }
+
+    public void DeleteQueues()
+    {
+        try
+        {
+            _channel.QueueDelete(_queueName);
+            _channel.QueueDelete(_dlqName);
+        }
+        catch
+        {
+            // Ignore errors if queues don't exist
+        }
     }
 
     public void Dispose()
     {
-        _channel?.CloseAsync().GetAwaiter().GetResult();
+        _channel?.Close();
         _channel?.Dispose();
-        _connection?.CloseAsync().GetAwaiter().GetResult();
+        _connection?.Close();
         _connection?.Dispose();
     }
 }

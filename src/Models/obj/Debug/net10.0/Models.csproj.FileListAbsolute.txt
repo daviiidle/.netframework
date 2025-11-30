@@ -10,3 +10,4 @@ C:\Users\D\Government Framework\src\Models\obj\Debug\net10.0\refint\Models.dll
 C:\Users\D\Government Framework\src\Models\obj\Debug\net10.0\Models.pdb
 C:\Users\D\Government Framework\src\Models\obj\Debug\net10.0\ref\Models.dll
 C:\Users\D\Government Framework\src\Models\obj\Debug\net10.0\Models.csproj.AssemblyReference.cache
+C:\Users\D\Government Framework\src\Models\obj\Debug\net10.0\Models.sourcelink.json

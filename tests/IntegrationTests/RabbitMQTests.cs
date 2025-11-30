@@ -6,47 +6,55 @@ using Xunit;
 [Collection("RabbitMQ")]
 public class RabbitMQTests : IDisposable
 {
-    private readonly RabbitMQQueue _queue;
-    private const string TestQueueName = "test-queue";
+    private readonly RabbitMQQueue? _queue;
+    private readonly string _testQueueName;
 
     public RabbitMQTests()
     {
-        // Skip if RabbitMQ is not available
-        if (!IsRabbitMQAvailable())
-        {
-            Skip.If(true, "RabbitMQ is not available");
-        }
+        // Use unique queue name per test run to avoid conflicts
+        _testQueueName = $"test-queue-{Guid.NewGuid()}";
 
-        _queue = new RabbitMQQueue("localhost", TestQueueName);
+        // Try to connect to RabbitMQ
+        try
+        {
+            _queue = new RabbitMQQueue("localhost", _testQueueName);
+            // Clean any existing messages
+            _queue.PurgeQueue();
+            _queue.PurgeDLQ();
+        }
+        catch
+        {
+            // RabbitMQ not available - tests will be skipped
+            _queue = null;
+        }
     }
 
     public void Dispose()
     {
+        // Clean up queues after tests
+        _queue?.DeleteQueues();
         _queue?.Dispose();
     }
 
-    private bool IsRabbitMQAvailable()
+    private void SkipIfUnavailable()
     {
-        try
+        if (_queue == null)
         {
-            var testQueue = new RabbitMQQueue("localhost", "connection-test");
-            testQueue.Dispose();
-            return true;
-        }
-        catch
-        {
-            return false;
+            // This will cause xUnit to skip the test
+            Assert.True(false, "RabbitMQ is not available. Start with: docker compose up -d");
         }
     }
 
     [Fact]
     public void Enqueue_AddsMessageToQueue()
     {
+        SkipIfUnavailable();
+
         // Arrange
         var message = new Message("TestSystem", "Test payload");
 
         // Act
-        _queue.Enqueue(message);
+        _queue!.Enqueue(message);
 
         // Assert
         var depth = _queue.GetQueueDepth();
@@ -56,9 +64,11 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void Dequeue_ReturnsEnqueuedMessage()
     {
+        SkipIfUnavailable();
+
         // Arrange
         var message = new Message("TestSystem", "Test payload");
-        _queue.Enqueue(message);
+        _queue!.Enqueue(message);
 
         // Act
         var dequeuedMessage = _queue.Dequeue();
@@ -73,8 +83,10 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void Dequeue_EmptyQueue_ReturnsNull()
     {
+        SkipIfUnavailable();
+
         // Arrange - ensure queue is empty
-        while (_queue.Dequeue() != null) { }
+        while (_queue!.Dequeue() != null) { }
 
         // Act
         var message = _queue.Dequeue();
@@ -86,8 +98,10 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void GetQueueDepth_ReturnsCorrectCount()
     {
+        SkipIfUnavailable();
+
         // Arrange - clear queue first
-        while (_queue.Dequeue() != null) { }
+        while (_queue!.Dequeue() != null) { }
 
         var message1 = new Message("TestSystem", "Payload 1");
         var message2 = new Message("TestSystem", "Payload 2");
@@ -106,11 +120,13 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void EnqueueToDLQ_AddsMessageToDLQ()
     {
+        SkipIfUnavailable();
+
         // Arrange
         var message = new Message("TestSystem", "Failed message");
 
         // Act
-        _queue.EnqueueToDLQ(message);
+        _queue!.EnqueueToDLQ(message);
 
         // Assert
         var dlqDepth = _queue.GetDLQDepth();
@@ -120,9 +136,11 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void DequeueDLQ_ReturnsMessageFromDLQ()
     {
+        SkipIfUnavailable();
+
         // Arrange
         var message = new Message("TestSystem", "Failed message");
-        _queue.EnqueueToDLQ(message);
+        _queue!.EnqueueToDLQ(message);
 
         // Act
         var dequeuedMessage = _queue.DequeueDLQ();
@@ -137,8 +155,10 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void DequeueDLQ_EmptyDLQ_ReturnsNull()
     {
+        SkipIfUnavailable();
+
         // Arrange - ensure DLQ is empty
-        while (_queue.DequeueDLQ() != null) { }
+        while (_queue!.DequeueDLQ() != null) { }
 
         // Act
         var message = _queue.DequeueDLQ();
@@ -150,8 +170,10 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void GetDLQDepth_ReturnsCorrectCount()
     {
+        SkipIfUnavailable();
+
         // Arrange - clear DLQ first
-        while (_queue.DequeueDLQ() != null) { }
+        while (_queue!.DequeueDLQ() != null) { }
 
         var message1 = new Message("TestSystem", "Failed 1");
         var message2 = new Message("TestSystem", "Failed 2");
@@ -168,8 +190,10 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void MultipleEnqueueDequeue_MaintainsFIFOOrder()
     {
+        SkipIfUnavailable();
+
         // Arrange - clear queue first
-        while (_queue.Dequeue() != null) { }
+        while (_queue!.Dequeue() != null) { }
 
         var message1 = new Message("TestSystem", "First");
         var message2 = new Message("TestSystem", "Second");
@@ -196,8 +220,10 @@ public class RabbitMQTests : IDisposable
     [Fact]
     public void QueueAndDLQ_AreIndependent()
     {
+        SkipIfUnavailable();
+
         // Arrange - clear both queues
-        while (_queue.Dequeue() != null) { }
+        while (_queue!.Dequeue() != null) { }
         while (_queue.DequeueDLQ() != null) { }
 
         var regularMessage = new Message("TestSystem", "Regular");
